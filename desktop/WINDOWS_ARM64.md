@@ -270,33 +270,5 @@ The Linux `Makefile` / `desktop/build.sh` path is unchanged. Windows uses:
      refuses while the game is running. Saves are kept.
    - Verified: launched from the shortcut, it reaches the title screen with no console
      process, and the CLI form still works.
-5. Done: **x86 PC-game mods, made native.** The ARM64 app can't load the x86 mod DLLs that
-   the PC game uses, so each mod got an ARM64 equivalent:
-   - **dgVoodoo2:** ARM64X `MS/arm64x/D3D9.dll` from the dgVoodoo2 2.85+ zip.
-     `install_win.ps1 -DgVoodooZip <zip> -DgVoodooConf <your dgVoodoo.conf>` puts it next to
-     the exe. The exe imports `d3d9.dll`, so the app folder's copy loads in place of the system
-     one; verified with the module list, and it renders through D3D12.
-   - **ReShade:** replaced by a built-in pass (`runtime/win/postfx.cpp`): SMAA, then AMD CAS,
-     then vibrance, run just before Present.
-     - SMAA (`SMAA.fxh` and its lookup textures, MIT, Jimenez et al.) and CAS (AMD, MIT) are
-       ported from the SweetFX copies in reshade-shaders, with their notices kept. Vibrance is
-       new code.
-     - Settings live in `lb_paths.ini [postfx]` (`enabled`, `smaa`, `smaa_edges`, `cas`,
-       `cas_sharpness`, `cas_contrast`, `vibrance`, `vibrance_strength`). `LB_POSTFX=0/1`
-       overrides `enabled`, and Scroll Lock toggles the pass when the game window has focus.
-     - While the pass is enabled, the device is created without `D3DCREATE_PUREDEVICE`, so
-       that state save/restore can use Get*.
-   - **Borderless:** `[display] window=borderless` gives a DPI-aware, desktop-sized
-     `SDL_WINDOW_FULLSCREEN_DESKTOP` window that doesn't minimize on focus loss.
-     - Window, mode-list and back-buffer sizes now use `SDL_GetWindowSizeInPixels`. Before
-       that, a 250% display reported 1536x960 points, and the game fell back to a 1152x720
-       back buffer.
-   - **Settings and saves:** the Windows build no longer moves `pcconfig.txt` aside on the
-     first launch (that was for phones). Steam Cloud saves live in
-     `<save>\steamcloud\<path with / turned into _>`; for example, Steam's
-     `remote\savedgames\slot1\game1.legomarvelsuperheroessavegamedata` becomes
-     `steamcloud\savedgames_slot1_game1.legomarvelsuperheroessavegamedata`.
-   - **Own game copy:** the installer prefers `%LOCALAPPDATA%\LEGO Marvel Super Heroes (ARM 64)\game`,
-     so tools that rewrite the `.DAT`s (CMM) never touch the Steam install.
-6. Next: play-test (menus, input, audio, saves, a level), and look for any other structs
+5. Next: play-test (menus, input, audio, saves, a level), and look for any other structs
    written directly into guest memory with 8-byte members.
