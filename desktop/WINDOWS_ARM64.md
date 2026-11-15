@@ -65,7 +65,8 @@ guest-facing shim files: `kernel32.c` defines its own `ERROR_*`, `WAIT_TIMEOUT` 
 - `runtime/win/posix_compat.h`: force-included (`-include`) for runtime C/C++ on `_WIN32`.
   It declares POSIX-named wrappers (`pthread_*`, `usleep`, `clock_gettime`, `opendir`...)
   and pulls in only `<io.h>`, `<direct.h>`, `<sys/stat.h>` and `<process.h>`, never `<windows.h>`.
-- `runtime/win/posix_compat.c` (+ `win_mem.c`, `win_crash.c`): the only files that include
+- `runtime/win/posix_compat.c` (POSIX wrappers, guest memory and lazy commit) and
+  `runtime/win/win_platform.c` (crash handler, stack guarantee): the only files that include
   `<windows.h>`.
 - Empty shim headers in `runtime/win/include/` for `unistd.h`, `pthread.h`, `dirent.h`,
   `strings.h`, `sys/time.h`, `sys/mman.h`, `sched.h` and `fnmatch.h` that just include
@@ -77,8 +78,8 @@ guest-facing shim files: `kernel32.c` defines its own `ERROR_*`, `WAIT_TIMEOUT` 
 
 | POSIX | Where | Win32 replacement |
 |---|---|---|
-| `mmap(NULL, 4 GiB, RW, PRIVATE\|ANON\|NORESERVE)` | main.c:377 | `VirtualAlloc(NULL, 1ull<<32, MEM_RESERVE\|MEM_COMMIT, PAGE_READWRITE)`. Commit is charged against the 44 GB commit limit but stays demand-zero, so it isn't resident. If commit is tight: `MEM_RESERVE` only, plus a vectored exception handler that commits 64 KiB on first touch. |
-| `mprotect(MEM, 0x10000, PROT_NONE)` | main.c:380 | `VirtualProtect(..., PAGE_NOACCESS, &old)` |
+| `mmap(NULL, 4 GiB, RW, PRIVATE\|ANON\|NORESERVE)` | main.c:393 | `VirtualAlloc(NULL, 1ull<<32, MEM_RESERVE\|MEM_COMMIT, PAGE_READWRITE)`. Commit is charged against the 44 GB commit limit but stays demand-zero, so it isn't resident. If commit is tight: `MEM_RESERVE` only, plus a vectored exception handler that commits 64 KiB on first touch. |
+| `mprotect(MEM, 0x10000, PROT_NONE)` | main.c:396 | `VirtualProtect(..., PAGE_NOACCESS, &old)` |
 | `madvise(MADV_DONTNEED)` in `gvfree` | heap.c:199 | `VirtualFree(p, n, MEM_DECOMMIT)` then `VirtualAlloc(p, n, MEM_COMMIT, PAGE_READWRITE)`. `gvalloc` relies on freed pages reading back as zero, which `MEM_RESET` does **not** guarantee. |
 
 ### Threads and sync (`kernel32.c`, `heap.c`, `dispatch.c`, `user32.c`, `xaudio2.c`, `misc.c`, `shader_status.c`, `marvel_shims.c`)
@@ -125,14 +126,16 @@ paths and resolves case through a directory cache. Windows accepts `/` and NTFS 
 case-insensitive, so add a `_WIN32` fast path where `resolve_ci` is just a `_stat64`.
 `g_game_dir` may now contain a drive letter (`D:\...`), so build it with `/` joins only.
 
-### Crash handler (`main.c:194-282`)
+### Crash handler (`main.c:196-286`)
 
 The glibc and Android branches use `sigaction`, `siginfo_t`, `ucontext`, `backtrace`,
-`dladdr`, `_Unwind_Backtrace`, `sigaltstack` and `gettid`. Add a third `#elif defined(_WIN32)`
-branch, in `win_crash.c`:
-- `AddVectoredExceptionHandler(1, ...)` for `EXCEPTION_ACCESS_VIOLATION` and friends.
-- Registers from `CONTEXT` (`X0`-`X28`, `Fp`, `Lr`, `Sp`, `Pc`).
-- `RtlCaptureStackBackTrace` + DbgHelp `SymFromAddr` / `SymGetModuleBase64` for module+offset.
+`dladdr`, `_Unwind_Backtrace`, `sigaltstack` and `gettid`. The Windows version lives in
+`runtime/win/win_platform.c`:
+- `SetUnhandledExceptionFilter` catches `EXCEPTION_ACCESS_VIOLATION` and friends. (The
+  vectored handler in `posix_compat.c` is only for lazy commit of guest memory.)
+- Registers come from `CONTEXT` (`X0`-`X28`, `Fp`, `Lr`, `Sp`, `Pc`).
+- The backtrace walks frames with `RtlLookupFunctionEntry` + `RtlVirtualUnwind`, and
+  `GetModuleHandleExA` gives module+offset. No DbgHelp is needed.
 - `SetThreadStackGuarantee` replaces `sigaltstack`, and `GetCurrentThreadId` replaces `gettid`.
 
 ### setjmp / longjmp (`setjmp.c`, `lift_prelude.h`): risk to test first
@@ -195,7 +198,8 @@ The Linux `Makefile` / `desktop/build.sh` path is unchanged. Windows uses:
    - `lb_runtime`: an OBJECT library from `runtime/*.c`, `runtime/win/*.c` and
      `runtime/*.cpp`. It can be built alone (`-Target lb_runtime`) before gen/ exists.
    - `lb.exe`: those plus SDL2 (imported from step 1) and `d3d9`, with `/STACK:8388608`,
-     a console subsystem and `/DEBUG` (lb.pdb). SDL2.dll is copied next to it.
+     the windowed (GUI) subsystem by default (`-DLB_CONSOLE=ON` for a console build) and
+     `/DEBUG` (lb.pdb). SDL2.dll is copied next to it.
      dbghelp, shlwapi and winmm are not needed.
    - Trial link with gen/ empty: the only unresolved symbols are generated ones, namely 29
      `f_<addr>_guest` functions and the `g_fn_table_*` / `g_fn_count_*` tables. No CRT, SDK
@@ -266,5 +270,33 @@ The Linux `Makefile` / `desktop/build.sh` path is unchanged. Windows uses:
      refuses while the game is running. Saves are kept.
    - Verified: launched from the shortcut, it reaches the title screen with no console
      process, and the CLI form still works.
-5. Next: play-test (menus, input, audio, saves, a level), and look for any other structs
+5. Done: **x86 PC-game mods, made native.** The ARM64 app can't load the x86 mod DLLs that
+   the PC game uses, so each mod got an ARM64 equivalent:
+   - **dgVoodoo2:** ARM64X `MS/arm64x/D3D9.dll` from the dgVoodoo2 2.85+ zip.
+     `install_win.ps1 -DgVoodooZip <zip> -DgVoodooConf <your dgVoodoo.conf>` puts it next to
+     the exe. The exe imports `d3d9.dll`, so the app folder's copy loads in place of the system
+     one; verified with the module list, and it renders through D3D12.
+   - **ReShade:** replaced by a built-in pass (`runtime/win/postfx.cpp`): SMAA, then AMD CAS,
+     then vibrance, run just before Present.
+     - SMAA (`SMAA.fxh` and its lookup textures, MIT, Jimenez et al.) and CAS (AMD, MIT) are
+       ported from the SweetFX copies in reshade-shaders, with their notices kept. Vibrance is
+       new code.
+     - Settings live in `lb_paths.ini [postfx]` (`enabled`, `smaa`, `smaa_edges`, `cas`,
+       `cas_sharpness`, `cas_contrast`, `vibrance`, `vibrance_strength`). `LB_POSTFX=0/1`
+       overrides `enabled`, and Scroll Lock toggles the pass when the game window has focus.
+     - While the pass is enabled, the device is created without `D3DCREATE_PUREDEVICE`, so
+       that state save/restore can use Get*.
+   - **Borderless:** `[display] window=borderless` gives a DPI-aware, desktop-sized
+     `SDL_WINDOW_FULLSCREEN_DESKTOP` window that doesn't minimize on focus loss.
+     - Window, mode-list and back-buffer sizes now use `SDL_GetWindowSizeInPixels`. Before
+       that, a 250% display reported 1536x960 points, and the game fell back to a 1152x720
+       back buffer.
+   - **Settings and saves:** the Windows build no longer moves `pcconfig.txt` aside on the
+     first launch (that was for phones). Steam Cloud saves live in
+     `<save>\steamcloud\<path with / turned into _>`; for example, Steam's
+     `remote\savedgames\slot1\game1.legomarvelsuperheroessavegamedata` becomes
+     `steamcloud\savedgames_slot1_game1.legomarvelsuperheroessavegamedata`.
+   - **Own game copy:** the installer prefers `%LOCALAPPDATA%\LEGO Marvel Super Heroes (ARM 64)\game`,
+     so tools that rewrite the `.DAT`s (CMM) never touch the Steam install.
+6. Next: play-test (menus, input, audio, saves, a level), and look for any other structs
    written directly into guest memory with 8-byte members.

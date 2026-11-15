@@ -2,6 +2,8 @@
 
 An unofficial "native" Android port of the PC version of *LEGO Marvel Super Heroes*. It should run on any arm64 phone with Vulkan 1.1 and is tested on a Snapdragon device with an Adreno 610 GPU (Retroid Pocket Duo Lite, if anyone is curious).
 
+> **About this fork:** the Android port and recompilation are by [ttom795](https://github.com/ttom795/LMS_Android). This fork only adds a native Windows 11 ARM64 desktop build, ported by JacobJBurrell. See [desktop/WINDOWS_ARM64.md](desktop/WINDOWS_ARM64.md).
+
 This repository contains no game code or data. You need your own copy of the PC game, which is used as a basis for the recompilation. Personally, I used the Steam version.
 
 Discord: http://discord.gg/df3cK2JCqs
@@ -121,6 +123,9 @@ Useful environment variables:
 | `LB_BCEMU=1` | Decodes DXT/BC textures on the CPU. |
 | `LB_GPU_VENDOR` | `keep` (default), `intel`, `nvidia` or `amd`: which GPU the game is told it has. |
 | `DXVK_HUD=portstatus` | Shows the shader that is compiling. |
+
+### 1.2.3 Native Windows 11 ARM64 build (this fork)
+`desktop/build_win.ps1` builds `lb.exe` for Windows on ARM with LLVM and xwin, and `desktop/install_win.ps1` installs it with a Start-menu shortcut. The toolchain, build steps and status are in [desktop/WINDOWS_ARM64.md](desktop/WINDOWS_ARM64.md).
 
 ## 3. Installing
 
