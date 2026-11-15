@@ -33,13 +33,17 @@ void rt_fatal(const char *fmt, ...) {
     fputc('\n', stderr);
     va_end(ap);
     fflush(stderr);
-#ifdef __ANDROID__
-    {   /* show it on screen too: the log is easy to miss on a phone */
+#if defined(__ANDROID__) || defined(_WIN32)
+    {   /* show it on screen too: the log is easy to miss on a phone (or with no console) */
         char msg[2048];
         va_start(ap, fmt);
         vsnprintf(msg, sizeof msg, fmt, ap);
         va_end(ap);
+#ifdef __ANDROID__
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, GAME_TITLE, msg, NULL);
+#else
+        win_fatal_box(GAME_TITLE, msg);
+#endif
     }
 #endif
     abort();
@@ -274,10 +278,15 @@ static void install_crash_handler(void) {
     int sigs[] = {SIGSEGV, SIGBUS, SIGFPE, SIGILL, SIGABRT};
     for (unsigned i = 0; i < sizeof sigs / sizeof *sigs; i++) sigaction(sigs[i], &sa, &g_old_sa[sigs[i]]);
 }
+#elif defined(_WIN32)
+/* Vectored/unhandled-exception crash report: runtime/win/win_platform.c */
+static void install_crash_handler(void) { win_install_crash_handler(); }
 #else
 static void install_crash_handler(void) {}
 #endif
-#if !defined(__ANDROID__)
+#if defined(_WIN32)
+void rt_altstack(void) { win_thread_stack_guarantee(); }
+#elif !defined(__ANDROID__)
 void rt_altstack(void) {}
 #endif
 
@@ -372,8 +381,15 @@ int main(int argc, char **argv) {
         if (!env) g_log_level = 1;
     }
 #endif
+#ifdef _WIN32
+    /* double-clicked / Start-menu launch: paths from lb_paths.ini next to the exe */
+    win_default_paths(g_game_dir, sizeof g_game_dir, g_save_dir, sizeof g_save_dir);
+#endif
     if (argc > 1) snprintf(g_game_dir, sizeof g_game_dir, "%s", argv[1]);
     if (argc > 2) snprintf(g_save_dir, sizeof g_save_dir, "%s", argv[2]);
+#ifdef _WIN32
+    win_setup_log(g_save_dir);  /* GUI subsystem: no console, so log to <save>\log.txt */
+#endif
     MEM = mmap(NULL, 1ull << 32, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
     if (MEM == MAP_FAILED) rt_fatal("cannot reserve guest address space");
     /* keep the null page inaccessible to catch null derefs */

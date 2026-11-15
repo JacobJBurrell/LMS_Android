@@ -16,7 +16,11 @@ void platform_init(void) {
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER | SDL_INIT_EVENTS) != 0)
         rt_fatal("SDL_Init: %s", SDL_GetError());
     int w = 1280, h = 720;
+#ifdef _WIN32
+    Uint32 flags = SDL_WINDOW_SHOWN;  /* system d3d9.dll presents to the HWND itself */
+#else
     Uint32 flags = SDL_WINDOW_VULKAN | SDL_WINDOW_SHOWN;
+#endif
     if (getenv("LB_WINDOW")) sscanf(getenv("LB_WINDOW"), "%dx%d", &w, &h);  /* desktop testing */
 #ifdef __ANDROID__
     flags |= SDL_WINDOW_FULLSCREEN;

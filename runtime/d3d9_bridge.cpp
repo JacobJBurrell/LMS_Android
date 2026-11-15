@@ -149,7 +149,7 @@ static void pp_from_guest(uint32_t g, D3DPRESENT_PARAMETERS *pp) {
     pp->MultiSampleType = (D3DMULTISAMPLE_TYPE)M32(g + 16);
     pp->MultiSampleQuality = M32(g + 20);
     pp->SwapEffect = (D3DSWAPEFFECT)M32(g + 24);
-    pp->hDeviceWindow = (HWND)platform_window();
+    pp->hDeviceWindow = (HWND)platform_d3d_window();
     pp->Windowed = TRUE; // the platform layer owns the (fullscreen) window
     pp->EnableAutoDepthStencil = M32(g + 36);
     pp->AutoDepthStencilFormat = (D3DFORMAT)M32(g + 40);
@@ -205,8 +205,23 @@ static const char *gpu_vendor_choice() {
 void B_IDirect3D9_GetAdapterIdentifier(CPU *c) {
     auto *d3d = (IDirect3D9 *)com_host(ARG(0));
     if (g_d3d_trace) d3d_trace(c, "IDirect3D9::GetAdapterIdentifier", 3);
-    auto *id = (D3DADAPTER_IDENTIFIER9 *)GPTR(ARG(3));
+    // The guest struct is the x86 layout: d3d9types.h uses #pragma pack(4) only on
+    // x86, so on a 64-bit host the trailing LARGE_INTEGER alignment pads it to 1104
+    // bytes. Writing that straight into the guest's 1100-byte stack buffer clobbered
+    // its /GS cookie. Fill a host copy, then copy back just the guest's 1100 bytes.
+    constexpr size_t kGuestSize = 0x44C;  // sizeof(D3DADAPTER_IDENTIFIER9) on x86
+    static_assert(offsetof(D3DADAPTER_IDENTIFIER9, WHQLLevel) + 4 == kGuestSize, "x86 layout");
+    D3DADAPTER_IDENTIFIER9 host_id;
+    memset(&host_id, 0, sizeof host_id);
+    D3DADAPTER_IDENTIFIER9 *id = ARG(3) ? &host_id : nullptr;
     HRESULT hr = d3d->GetAdapterIdentifier(ARG(1), ARG(2), id);
+    if (SUCCEEDED(hr) && id) {
+        // LB_GPU_DESC replaces the adapter description the game sees.
+        const char *desc = getenv("LB_GPU_DESC");
+        LOG("GetAdapterIdentifier: \"%s\" (%u chars)%s%s", id->Description, (unsigned)strlen(id->Description),
+            desc ? " -> " : "", desc ? desc : "");
+        if (desc) snprintf(id->Description, sizeof id->Description, "%s", desc);
+    }
     const char *v = gpu_vendor_choice();
     if (SUCCEEDED(hr) && id && strcmp(v, "keep")) {
         uint32_t ven = 0x8086, dev = 0x5912;                     // Intel HD 630
@@ -217,6 +232,7 @@ void B_IDirect3D9_GetAdapterIdentifier(CPU *c) {
         id->VendorId = ven;
         id->DeviceId = dev;
     }
+    if (SUCCEEDED(hr) && id) memcpy(GPTR(ARG(3)), id, kGuestSize);
     RET((uint32_t)hr, 4);
 }
 
@@ -277,7 +293,7 @@ void B_IDirect3D9_CreateDevice(CPU *c) {
         pp.AutoDepthStencilFormat, M32(ARG(5) + 32), ARG(4), pp.PresentationInterval);
     IDirect3DDevice9 *dev = nullptr;
     DWORD flags = ARG(4) | D3DCREATE_MULTITHREADED;
-    HRESULT hr = d3d->CreateDevice(ARG(1), (D3DDEVTYPE)ARG(2), (HWND)platform_window(), flags, &pp, &dev);
+    HRESULT hr = d3d->CreateDevice(ARG(1), (D3DDEVTYPE)ARG(2), (HWND)platform_d3d_window(), flags, &pp, &dev);
     pp_to_guest(&pp, ARG(5));
     if (ARG(6)) M32(ARG(6)) = SUCCEEDED(hr) ? d3d9_wrap(dev, IFACE_IDirect3DDevice9) : 0;
     LOG("CreateDevice -> %08x", (uint32_t)hr);

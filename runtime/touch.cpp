@@ -504,8 +504,14 @@ static void restore_pcconfig_defaults() {
     std::string path;
     if (!find_ci(g_save_dir, "pcconfig.txt", path, 6)) { LOG("defaults: no pcconfig.txt yet"); return; }
     std::string bak = path.substr(0, path.size() - 12) + "pcconfig_low.bak";
+#ifdef _WIN32
+    // UCRT rename() fails if the .bak already exists; POSIX (and compat_rename) replaces it.
+    int moved = compat_rename(path.c_str(), bak.c_str());
+#else
+    int moved = rename(path.c_str(), bak.c_str());
+#endif
     LOG("defaults: moved %s aside (%s) so the game uses its own defaults",
-        path.c_str(), rename(path.c_str(), bak.c_str()) == 0 ? "ok" : strerror(errno));
+        path.c_str(), moved == 0 ? "ok" : strerror(errno));
 }
 
 static bool first_launch_low() {

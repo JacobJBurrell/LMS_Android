@@ -1096,7 +1096,19 @@ SHIM(IsDebuggerPresent) { RET(0, 0); }
 SHIM(GetLastError) { RET(rt_get_last_error(c), 0); }
 SHIM(SetLastError) { rt_set_last_error(c, ARG(0)); RET(0, 1); }
 SHIM(SetUnhandledExceptionFilter) { RET(0, 1); }
-SHIM(UnhandledExceptionFilter) { RET(0, 1); }
+SHIM(UnhandledExceptionFilter) {
+    /* The guest CRT calls this on /GS failures and fatal errors: log the exception
+     * record and the guest context (x86 CONTEXT: Ebp +0xB4, Eip +0xB8, Esp +0xC4). */
+    uint32_t ep = ARG(0), er = ep ? M32(ep) : 0, cx = ep ? M32(ep + 4) : 0;
+    if (er) LOG("UnhandledExceptionFilter: code %08x at guest %08x", M32(er), M32(er + 12));
+    if (cx) {
+        uint32_t ebp = M32(cx + 0xB4);
+        LOG("  context eip %08x esp %08x ebp %08x; frames:", M32(cx + 0xB8), M32(cx + 0xC4), ebp);
+        for (int i = 0; i < 12 && ebp >= 0x10000u && ebp < 0xFFFFFFF0u; i++, ebp = M32(ebp))
+            LOG("    #%d ret %08x (ebp %08x)", i, M32(ebp + 4), ebp);
+    }
+    RET(0, 1);
+}
 SHIM(SetConsoleCtrlHandler) { RET(1, 2); }
 SHIM(OutputDebugStringA) { LOG("[guest] %s", GSTR(ARG(0))); RET(0, 1); }
 SHIM(OutputDebugStringW) {
@@ -1111,7 +1123,16 @@ SHIM(OutputDebugStringW) {
 SHIM(DebugBreak) { rt_fatal("guest DebugBreak"); }
 SHIM(FatalAppExitA) { rt_fatal("FatalAppExit: %s", GSTR(ARG(1))); }
 SHIM(ExitProcess) { LOG("ExitProcess(%u)", ARG(0)); fflush(NULL); _exit((int)ARG(0)); }
-SHIM(TerminateProcess) { LOG("TerminateProcess(%u)", ARG(1)); fflush(NULL); _exit((int)ARG(1)); }
+SHIM(TerminateProcess) {
+    /* 0xC0000409 is the guest CRT's fast fail (/GS cookie, invalid parameter): say who called. */
+    LOG("TerminateProcess(%u = 0x%08x) called from guest %08x", ARG(1), ARG(1), M32(c->r[4]));
+    rt_dump_guest();
+    fprintf(stderr, "  guest stack:");
+    for (int i = 0; i < 24; i++) fprintf(stderr, "%s %08x", i % 8 ? "" : "\n   ", M32(c->r[4] + 4 * i));
+    fputc('\n', stderr);
+    fflush(NULL);
+    _exit((int)ARG(1));
+}
 SHIM(RaiseException) {
     uint32_t code = ARG(0);
     if (code == 0x406D1388u) RET(0, 4);  /* MS_VC_EXCEPTION: SetThreadName for a debugger */

@@ -1,6 +1,9 @@
 // Shared declarations for the guest<->host Direct3D 9 bridge (C++ side).
 #pragma once
 #include <d3d9.h>
+#ifdef GPTR
+#undef GPTR  // <winbase.h> GlobalAlloc flag; rt.h's GPTR() is the guest-pointer helper
+#endif
 #include <cstdint>
 #include <cstring>
 
@@ -29,6 +32,17 @@ bool d3d_skip_draw(void);
 void d3d_trace(CPU *c, const char *name, int nargs);
 
 extern "C" {
-void *platform_window(void);
+void *platform_window(void);  // the SDL_Window*
 void platform_present_hook(void);
+#ifdef _WIN32
+void *platform_hwnd(void);    // real HWND for the system d3d9.dll (runtime/win/win_platform.c)
+#endif
+}
+// What D3D9 calls the device window: dxvk-native takes the SDL_Window* itself.
+static inline void *platform_d3d_window(void) {
+#ifdef _WIN32
+    return platform_hwnd();
+#else
+    return platform_window();
+#endif
 }
