@@ -8,6 +8,9 @@
 void shadow_flush(void *obj);
 void shadow_forget(void *obj);
 #include "d3d9_bridge.h"
+#ifdef _WIN32
+#include "win/postfx.h"
+#endif
 void bc_forget(void *obj);
 bool bc_lock(void *tex, uint32_t sub, uint32_t w, uint32_t h, const RECT *r, DWORD flags, uint32_t out,
              const std::function<HRESULT(D3DLOCKED_RECT *, const RECT *)> &lock, HRESULT *hr);
@@ -94,6 +97,9 @@ void com_AddRef(CPU *c) {
 void com_Release(CPU *c) {
     uint32_t g = ARG(0);
     auto *u = (IUnknown *)com_host(g);
+#ifdef _WIN32
+    if ((int)M32(g + 8) == IFACE_IDirect3DDevice9) postfx_device_release((IDirect3DDevice9 *)u);
+#endif
     ULONG r = u->Release();
     if (r == 0) com_forget(g);
     RET(r, 1);
@@ -242,7 +248,7 @@ void B_IDirect3D9_GetAdapterIdentifier(CPU *c) {
 // (The game drops modes under 640x480; touch.cpp puts them back.)
 extern "C" void bridge_scaled_mode(uint32_t i, uint32_t *w, uint32_t *h) {
     int ww = 1280, wh = 720;
-    SDL_GetWindowSize((SDL_Window *)platform_window(), &ww, &wh);
+    platform_window_pixels(&ww, &wh);
     *w = (uint32_t)(ww * (2 + i) / 10) & ~1u;
     *h = (uint32_t)(wh * (2 + i) / 10) & ~1u;
 }
@@ -268,7 +274,7 @@ void B_IDirect3D9_GetAdapterDisplayMode(CPU *c) {
     HRESULT hr = d3d->GetAdapterDisplayMode(ARG(1), &m);
     if (FAILED(hr) || !m.Width || !m.Height) {
         int w = 1280, h = 720;
-        SDL_GetWindowSize((SDL_Window *)platform_window(), &w, &h);
+        platform_window_pixels(&w, &h);
         m.Width = (UINT)w;
         m.Height = (UINT)h;
         m.RefreshRate = 60;
@@ -293,6 +299,9 @@ void B_IDirect3D9_CreateDevice(CPU *c) {
         pp.AutoDepthStencilFormat, M32(ARG(5) + 32), ARG(4), pp.PresentationInterval);
     IDirect3DDevice9 *dev = nullptr;
     DWORD flags = ARG(4) | D3DCREATE_MULTITHREADED;
+#ifdef _WIN32
+    flags = postfx_create_flags(flags);
+#endif
     HRESULT hr = d3d->CreateDevice(ARG(1), (D3DDEVTYPE)ARG(2), (HWND)platform_d3d_window(), flags, &pp, &dev);
     pp_to_guest(&pp, ARG(5));
     if (ARG(6)) M32(ARG(6)) = SUCCEEDED(hr) ? d3d9_wrap(dev, IFACE_IDirect3DDevice9) : 0;
@@ -328,6 +337,9 @@ void B_IDirect3DDevice9_Reset(CPU *c) {
     auto *d = (IDirect3DDevice9 *)com_host(ARG(0));
     D3DPRESENT_PARAMETERS pp;
     pp_from_guest(ARG(1), &pp);
+#ifdef _WIN32
+    postfx_device_lost();
+#endif
     HRESULT hr = d->Reset(&pp);
     pp_to_guest(&pp, ARG(1));
     LOG("Reset %ux%u -> %08x", pp.BackBufferWidth, pp.BackBufferHeight, (uint32_t)hr);
@@ -387,6 +399,9 @@ void B_IDirect3DDevice9_Present(CPU *c) {
     g_frame++;
     g_d3d_trace = g_frame >= g_trace_from && g_frame <= g_trace_to;
     if (g_d3d_trace) fprintf(stderr, "D3D %d Present\n", g_frame);
+#ifdef _WIN32
+    postfx_present(d);
+#endif
     extern void touch_draw(IDirect3DDevice9 *d);
     touch_draw(d);
     HRESULT hr = d->Present((const RECT *)GPTR(ARG(1)), (const RECT *)GPTR(ARG(2)), nullptr,
@@ -404,6 +419,9 @@ void B_IDirect3DDevice9_GetNPatchMode(CPU *c) {
 
 void B_IDirect3DSwapChain9_Present(CPU *c) {
     auto *s = (IDirect3DSwapChain9 *)com_host(ARG(0));
+#ifdef _WIN32
+    postfx_present_swapchain(s);
+#endif
     HRESULT hr = s->Present((const RECT *)GPTR(ARG(1)), (const RECT *)GPTR(ARG(2)), nullptr,
                             (const RGNDATA *)GPTR(ARG(4)), ARG(5));
     platform_present_hook();

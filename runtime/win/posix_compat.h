@@ -181,6 +181,9 @@ void win_default_paths(char *game, size_t game_sz, char *save, size_t save_sz);
 /* GUI subsystem: with no usable stderr, log to <save_dir>/log.txt (creates the dir). */
 void win_setup_log(const char *save_dir);
 void win_fatal_box(const char *title, const char *msg);
+/* Reads [section] key from lb_paths.ini next to the exe (%VARS% expanded).
+ * Returns 1 and fills out when the key exists and is non-empty, else 0. */
+int win_ini_get(const char *section, const char *key, char *out, size_t out_sz);
 
 #ifdef __cplusplus
 }

@@ -18,17 +18,25 @@
   .\desktop\install_win.ps1
 .EXAMPLE
   .\desktop\install_win.ps1 -GameDir "E:\Games\LEGO Marvel Super Heroes"
+.EXAMPLE
+  .\desktop\install_win.ps1 -DgVoodooZip dgVoodoo2_87_6.zip -DgVoodooConf "<x86 game folder>\dgVoodoo.conf"
 #>
 [CmdletBinding()]
 param(
-    [string]$GameDir = '',                # default: found in your Steam libraries
+    [string]$GameDir = '',                # default: the app's own game copy, else your Steam libraries
     [string]$SaveDir = '%LOCALAPPDATA%\LEGO Marvel Super Heroes (ARM 64)\save',
-    [string]$BuildDir = ''
+    [string]$BuildDir = '',
+    [ValidateSet('borderless', 'windowed')][string]$Window = 'borderless',
+    [string]$DgVoodooZip = '',            # dgVoodoo2 release zip: installs its native ARM64X D3D9.dll
+    [string]$DgVoodooConf = ''            # dgVoodoo.conf to use with it (e.g. from your x86 game folder)
 )
 $ErrorActionPreference = 'Stop'
 
-# Default game folder: look for the Steam install in every Steam library folder
-# (Steam's libraryfolders.vdf lists them).
+# Default game folder: the ARM64 app's own copy of the game if there is one (keeps your
+# Steam install untouched, e.g. for CMM), else the Steam install found through Steam's
+# libraryfolders.vdf.
+$OwnCopy = Join-Path $env:LOCALAPPDATA 'LEGO Marvel Super Heroes (ARM 64)\game'
+if (-not $GameDir -and (Test-Path (Join-Path $OwnCopy 'LEGOMARVEL.exe'))) { $GameDir = $OwnCopy }
 if (-not $GameDir) {
     $libs = @()
     $steam = Join-Path ${env:ProgramFiles(x86)} 'Steam'
@@ -69,12 +77,43 @@ if (Get-Process | Where-Object { $_.Path -and $_.Path -ieq (Join-Path $Dest $Exe
 New-Item -ItemType Directory -Force $Dest | Out-Null
 Copy-Item (Join-Path $BuildDir 'lb.exe') (Join-Path $Dest $ExeName) -Force
 Copy-Item (Join-Path $BuildDir 'SDL2.dll') (Join-Path $Dest 'SDL2.dll') -Force
+
+# --- optional dgVoodoo2: its native ARM64X D3D9.dll next to the exe is loaded instead of the
+# system d3d9.dll (the exe imports d3d9.dll; the app folder is searched first).
+$dgDll = Join-Path $Dest 'D3D9.dll'
+$dgConf = Join-Path $Dest 'dgVoodoo.conf'
+if ($DgVoodooZip) {
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $zip = [IO.Compression.ZipFile]::OpenRead((Resolve-Path $DgVoodooZip).Path)
+    try {
+        $entry = $zip.Entries | Where-Object { $_.FullName -ieq 'MS/arm64x/D3D9.dll' } | Select-Object -First 1
+        if (-not $entry) { throw "$DgVoodooZip has no MS/arm64x/D3D9.dll (needs dgVoodoo2 2.85 or newer)" }
+        [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $dgDll, $true)
+    } finally { $zip.Dispose() }
+    if ($DgVoodooConf) { Copy-Item $DgVoodooConf $dgConf -Force }
+    Write-Host "  dgVoodoo: ARM64X D3D9.dll installed$(if ($DgVoodooConf) { ' with ' + $DgVoodooConf })"
+} else {
+    # no dgVoodoo requested: remove one a previous install put here, so the system d3d9.dll is used
+    foreach ($f in $dgDll, $dgConf) { if (Test-Path $f) { Remove-Item $f -Force } }
+}
+
 $ini = @"
 ; Read by "$ExeName" when it is started without arguments.
 ; %VARIABLES% are expanded. Command-line arguments (game dir, save dir) override these.
 [paths]
 game_dir=$GameDir
 save_dir=$SaveDir
+
+[display]
+; borderless = desktop-sized borderless window at native resolution; windowed = 1280x720 window
+window=$Window
+
+[postfx]
+; built-in SMAA + CAS sharpening + vibrance (ReShade replacement); Scroll Lock toggles in game
+; keys: smaa, smaa_edges (color|luma), cas, cas_sharpness (0..1), cas_contrast (0..1),
+;       vibrance, vibrance_strength (-1..1)
+enabled=1
+smaa_edges=color
 "@
 Set-Content -Path (Join-Path $Dest 'lb_paths.ini') -Value $ini -Encoding ASCII
 

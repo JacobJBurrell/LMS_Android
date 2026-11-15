@@ -38,14 +38,26 @@ static void mkdirs(const char *path) {
     CreateDirectoryA(tmp, NULL);
 }
 
+static int ini_path(char *ini, size_t sz) {
+    DWORD n = GetModuleFileNameA(NULL, ini, (DWORD)sz);
+    if (!n || n >= sz) return 0;
+    char *slash = strrchr(ini, '\\');
+    if (!slash || (size_t)(slash - ini) + 16 >= sz) return 0;
+    strcpy(slash + 1, "lb_paths.ini");
+    return GetFileAttributesA(ini) != INVALID_FILE_ATTRIBUTES;
+}
+
+int win_ini_get(const char *section, const char *key, char *out, size_t out_sz) {
+    char ini[MAX_PATH], raw[1024];
+    if (!out_sz || !ini_path(ini, sizeof ini)) return 0;
+    if (!GetPrivateProfileStringA(section, key, "", raw, sizeof raw, ini) || !raw[0]) return 0;
+    ExpandEnvironmentStringsA(raw, out, (DWORD)out_sz);
+    return out[0] != 0;
+}
+
 void win_default_paths(char *game, size_t game_sz, char *save, size_t save_sz) {
     char ini[MAX_PATH];
-    DWORD n = GetModuleFileNameA(NULL, ini, sizeof ini);
-    if (!n || n >= sizeof ini) return;
-    char *slash = strrchr(ini, '\\');
-    if (!slash || (size_t)(slash - ini) + 16 >= sizeof ini) return;
-    strcpy(slash + 1, "lb_paths.ini");
-    if (GetFileAttributesA(ini) == INVALID_FILE_ATTRIBUTES) return;
+    if (!ini_path(ini, sizeof ini)) return;
     char raw[1024];
     if (GetPrivateProfileStringA("paths", "game_dir", "", raw, sizeof raw, ini) && raw[0])
         ExpandEnvironmentStringsA(raw, game, (DWORD)game_sz);

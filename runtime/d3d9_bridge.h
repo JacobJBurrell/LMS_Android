@@ -33,6 +33,7 @@ void d3d_trace(CPU *c, const char *name, int nargs);
 
 extern "C" {
 void *platform_window(void);  // the SDL_Window*
+void platform_window_pixels(int *w, int *h);  // window size in pixels (platform_sdl.c)
 void platform_present_hook(void);
 #ifdef _WIN32
 void *platform_hwnd(void);    // real HWND for the system d3d9.dll (runtime/win/win_platform.c)

@@ -69,7 +69,7 @@ target_compile_options(lb_gen PRIVATE ${LB_COMMON_FLAGS} ${LB_GEN_CFLAGS})
 
 # ------------------------------------------------------------------ runtime
 file(GLOB LB_RT_C CONFIGURE_DEPENDS "${LB_ROOT}/runtime/*.c" "${LB_ROOT}/runtime/win/*.c")
-file(GLOB LB_RT_CXX CONFIGURE_DEPENDS "${LB_ROOT}/runtime/*.cpp")
+file(GLOB LB_RT_CXX CONFIGURE_DEPENDS "${LB_ROOT}/runtime/*.cpp" "${LB_ROOT}/runtime/win/*.cpp")
 
 # OBJECT (not STATIC) so every runtime object reaches the link, as in the Makefile.
 add_library(lb_runtime OBJECT ${LB_RT_C} ${LB_RT_CXX})

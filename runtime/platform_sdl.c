@@ -8,16 +8,38 @@
 #endif
 
 static SDL_Window *g_window;
+void platform_window_pixels(int *w, int *h);
 static int g_frames;
 static void load_key_script(void);
 
 void platform_init(void) {
     SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
+#ifdef _WIN32
+    /* lb_paths.ini [display] window=borderless: a borderless window covering the desktop at
+     * native resolution (DPI-aware, so a 3840x2400 panel really gets 3840x2400). LB_WINDOW
+     * (desktop testing) wins over it. */
+    int borderless = 0;
+    {
+        char mode[32];
+        borderless = !getenv("LB_WINDOW") && win_ini_get("display", "window", mode, sizeof mode) &&
+                     !strcasecmp(mode, "borderless");
+        if (borderless) {
+            SDL_SetHint(SDL_HINT_WINDOWS_DPI_AWARENESS, "permonitorv2");
+            /* like a borderless window (dgVoodoo's mode): stay put when another app gets focus */
+            SDL_SetHint(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS, "0");
+        }
+    }
+#endif
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER | SDL_INIT_EVENTS) != 0)
         rt_fatal("SDL_Init: %s", SDL_GetError());
     int w = 1280, h = 720;
 #ifdef _WIN32
     Uint32 flags = SDL_WINDOW_SHOWN;  /* system d3d9.dll presents to the HWND itself */
+    if (borderless) {
+        SDL_DisplayMode dm;
+        if (SDL_GetDesktopDisplayMode(0, &dm) == 0) { w = dm.w; h = dm.h; }
+        flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
+    }
 #else
     Uint32 flags = SDL_WINDOW_VULKAN | SDL_WINDOW_SHOWN;
 #endif
@@ -31,11 +53,26 @@ void platform_init(void) {
     if (!g_window) rt_fatal("SDL_CreateWindow: %s", SDL_GetError());
     extern void user32_set_screen(int, int);
     user32_set_screen(w, h);
-    LOG("platform: window %dx%d", w, h);
+    {
+        int pw = w, ph = h;
+        platform_window_pixels(&pw, &ph);
+        LOG("platform: window %dx%d (%dx%d pixels)", w, h, pw, ph);
+    }
     load_key_script();
 }
 
 void *platform_window(void) { return g_window; }
+
+/* Window size in pixels for render sizing. On a DPI-aware Windows window SDL_GetWindowSize
+ * reports scaled points (a 3840x2400 panel at 250% gives 1536x960), so modes and back
+ * buffers must use the pixel size there. Elsewhere this is SDL_GetWindowSize, as before. */
+void platform_window_pixels(int *w, int *h) {
+#ifdef _WIN32
+    SDL_GetWindowSizeInPixels(g_window, w, h);
+#else
+    SDL_GetWindowSize(g_window, w, h);
+#endif
+}
 
 /* Scripted input for automated runs: LB_KEYS="frame:Key[:frames],..." holds
  * the SDL-named key (e.g. Return, Space, Left) from that frame on. */

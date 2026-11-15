@@ -360,7 +360,7 @@ extern "C" void f_8E9F60(CPU *c) {
     if (!rows) return;
     uint32_t w = M32(M32(M_MODES) + M32(M_MODE) * 16);
     int ww = 1280, wh = 720;
-    SDL_GetWindowSize((SDL_Window *)platform_window(), &ww, &wh);
+    platform_window_pixels(&ww, &wh);
     int tenths = ww > 0 ? (int)((w * 10 + ww / 2) / ww) : 10;
     if (tenths < 0) tenths = 0;
     if (tenths > 10) tenths = 10;
@@ -521,7 +521,10 @@ static bool first_launch_low() {
         struct stat st;
         v = stat(marker.c_str(), &st) != 0;
         if (v) {
-            restore_pcconfig_defaults();
+#ifndef _WIN32
+            restore_pcconfig_defaults();  // phones: drop old low-quality configs once
+#endif
+            // Windows desktop: keep pcconfig.txt as is; it may be the user's own PC config.
             if (FILE *f = fopen(marker.c_str(), "w")) fclose(f);
         }
     }
@@ -631,7 +634,7 @@ extern "C" void f_6C80D0(CPU *c) {
     uint32_t mode = M32(0x9D0EEC) + M32(0x9D0F38) * 16;
     uint32_t w = M32(mode), h = M32(mode + 4), hz = M32(mode + 8);
     int ww = 1280, wh = 720;
-    SDL_GetWindowSize((SDL_Window *)platform_window(), &ww, &wh);
+    platform_window_pixels(&ww, &wh);
     int tenths = ww > 0 ? (int)((w * 10 + ww / 2) / ww) : 10;
     if (tenths < 2) tenths = 2;
     if (tenths > 10) tenths = 10;
